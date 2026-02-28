@@ -977,3 +977,104 @@ class TestSetupDependencies:
             assert idx1 < idx2  # dep1 has higher priority (lower index)
         finally:
             sys.path = original_path
+
+
+class TestModuleStyleGraphPaths:
+    """Test support for module-style graph paths (e.g. my_package.my_module:graph)."""
+
+    def test_load_graph_registry_detects_module_path(self):
+        """Module-style paths (no / and no .py) are flagged as is_module=True."""
+        service = LangGraphService()
+        service.config = {"graphs": {"my_graph": "my_package.my_module:graph"}}
+        service.config_path = Path("aegra.json")
+
+        service._load_graph_registry()
+
+        assert "my_graph" in service._graph_registry
+        entry = service._graph_registry["my_graph"]
+        assert entry["is_module"] is True
+        assert entry["file_path"] == "my_package.my_module"
+        assert entry["export_name"] == "graph"
+
+    def test_load_graph_registry_detects_file_path(self):
+        """File-style paths (containing .py) are flagged as is_module=False."""
+        service = LangGraphService()
+        service.config = {"graphs": {"my_graph": "./graphs/my_graph.py:graph"}}
+        service.config_path = Path("aegra.json")
+
+        service._load_graph_registry()
+
+        assert "my_graph" in service._graph_registry
+        entry = service._graph_registry["my_graph"]
+        assert entry["is_module"] is False
+        assert entry["export_name"] == "graph"
+
+    def test_load_graph_registry_detects_path_with_slash(self):
+        """Paths containing / are treated as file paths, not modules."""
+        service = LangGraphService()
+        service.config = {"graphs": {"my_graph": "graphs/my_module:graph"}}
+        service.config_path = Path("aegra.json")
+
+        service._load_graph_registry()
+
+        entry = service._graph_registry["my_graph"]
+        assert entry["is_module"] is False
+
+    @pytest.mark.asyncio
+    async def test_load_graph_from_file_uses_import_module_for_module_path(self):
+        """Module-style paths use importlib.import_module, not spec_from_file_location."""
+        service = LangGraphService()
+
+        mock_module = Mock()
+        mock_graph = object()
+        mock_module.graph = mock_graph
+
+        graph_info = {"file_path": "my_package.my_module", "export_name": "graph", "is_module": True}
+
+        with patch("importlib.import_module", return_value=mock_module) as mock_import:
+            result = await service._load_graph_from_file("my_graph", graph_info)
+
+            mock_import.assert_called_once_with("my_package.my_module")
+            assert result is mock_graph
+
+    @pytest.mark.asyncio
+    async def test_load_graph_from_file_module_callable_invoked(self):
+        """An async callable export in a module-style path is awaited to get the graph."""
+        service = LangGraphService()
+
+        mock_graph = object()
+
+        async def async_factory():
+            return mock_graph
+
+        mock_module = Mock()
+        mock_module.graph = async_factory
+
+        graph_info = {"file_path": "my_package.my_module", "export_name": "graph", "is_module": True}
+
+        with patch("importlib.import_module", return_value=mock_module):
+            result = await service._load_graph_from_file("my_graph", graph_info)
+            assert result is mock_graph
+
+    @pytest.mark.asyncio
+    async def test_load_graph_from_file_module_not_found(self):
+        """ImportError is wrapped in ValueError for bad module-style paths."""
+        service = LangGraphService()
+
+        graph_info = {"file_path": "my_package.nonexistent", "export_name": "graph", "is_module": True}
+
+        with patch("importlib.import_module", side_effect=ModuleNotFoundError("No module named 'my_package'")):
+            with pytest.raises(ValueError, match="Failed to import graph module"):
+                await service._load_graph_from_file("my_graph", graph_info)
+
+    @pytest.mark.asyncio
+    async def test_load_graph_from_file_module_export_not_found(self):
+        """AttributeError/ValueError raised when export name is missing from module."""
+        service = LangGraphService()
+
+        mock_module = Mock(spec=[])  # no attributes
+        graph_info = {"file_path": "my_package.my_module", "export_name": "missing_export", "is_module": True}
+
+        with patch("importlib.import_module", return_value=mock_module):
+            with pytest.raises((AttributeError, ValueError)):
+                await service._load_graph_from_file("my_graph", graph_info)

@@ -91,3 +91,65 @@ class TestDatabaseURLSupport:
 
         # _normalize_scheme won't match, so URL passes through as-is
         assert db.DATABASE_URL == "not-a-url"
+
+
+class TestAegraDatabaseURLSupport:
+    """Test that AEGRA_DATABASE_URL takes precedence over DATABASE_URL."""
+
+    def test_aegra_database_url_takes_precedence_over_database_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AEGRA_DATABASE_URL is used when both vars are set."""
+        monkeypatch.setenv("AEGRA_DATABASE_URL", "postgresql://aegra_user:aegra_pass@aegra-host:5432/aegra")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://app_user:app_pass@app-host:5432/appdb")
+
+        db = DatabaseSettings(_env_file=None)
+
+        assert "aegra_user:aegra_pass@aegra-host:5432/aegra" in db.database_url
+        assert "aegra_user:aegra_pass@aegra-host:5432/aegra" in db.database_url_sync
+        assert "app_user" not in db.database_url
+        assert "app_user" not in db.database_url_sync
+
+    def test_aegra_database_url_scheme_normalized_async(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AEGRA_DATABASE_URL is normalized to asyncpg driver for database_url."""
+        monkeypatch.setenv("AEGRA_DATABASE_URL", "postgresql://user:pass@host:5432/aegra")
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+
+        db = DatabaseSettings(_env_file=None)
+
+        assert db.database_url.startswith("postgresql+asyncpg://")
+        assert "user:pass@host:5432/aegra" in db.database_url
+
+    def test_aegra_database_url_scheme_normalized_sync(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AEGRA_DATABASE_URL is normalized to plain postgresql:// for database_url_sync."""
+        monkeypatch.setenv("AEGRA_DATABASE_URL", "postgresql://user:pass@host:5432/aegra")
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+
+        db = DatabaseSettings(_env_file=None)
+
+        assert db.database_url_sync.startswith("postgresql://")
+        assert not db.database_url_sync.startswith("postgresql+")
+        assert "user:pass@host:5432/aegra" in db.database_url_sync
+
+    def test_falls_back_to_database_url_when_aegra_not_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Falls back to DATABASE_URL when AEGRA_DATABASE_URL is not set."""
+        monkeypatch.delenv("AEGRA_DATABASE_URL", raising=False)
+        monkeypatch.setenv("DATABASE_URL", "postgresql://app_user:app_pass@app-host:5432/appdb")
+
+        db = DatabaseSettings(_env_file=None)
+
+        assert "app_user:app_pass@app-host:5432/appdb" in db.database_url
+        assert "app_user:app_pass@app-host:5432/appdb" in db.database_url_sync
+
+    def test_falls_back_to_postgres_vars_when_neither_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Falls back to POSTGRES_* vars when neither AEGRA_DATABASE_URL nor DATABASE_URL is set."""
+        monkeypatch.delenv("AEGRA_DATABASE_URL", raising=False)
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        monkeypatch.setenv("POSTGRES_USER", "pguser")
+        monkeypatch.setenv("POSTGRES_PASSWORD", "pgpass")
+        monkeypatch.setenv("POSTGRES_HOST", "pghost")
+        monkeypatch.setenv("POSTGRES_PORT", "5432")
+        monkeypatch.setenv("POSTGRES_DB", "aegra")
+
+        db = DatabaseSettings(_env_file=None)
+
+        assert "pguser:pgpass@pghost:5432/aegra" in db.database_url
+        assert "pguser:pgpass@pghost:5432/aegra" in db.database_url_sync
