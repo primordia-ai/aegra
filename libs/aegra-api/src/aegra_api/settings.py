@@ -58,6 +58,7 @@ class DatabaseSettings(EnvBase):
     2. Individual POSTGRES_* vars — used when DATABASE_URL is not set
     """
 
+    AEGRA_DATABASE_URL: str | None = None
     DATABASE_URL: str | None = None
 
     POSTGRES_USER: str = "postgres"
@@ -66,6 +67,11 @@ class DatabaseSettings(EnvBase):
     POSTGRES_PORT: str = "5432"
     POSTGRES_DB: str = "aegra"
     DB_ECHO_LOG: bool = False
+
+    @property
+    def _resolved_database_url(self) -> str | None:
+        """AEGRA_DATABASE_URL takes precedence over DATABASE_URL."""
+        return self.AEGRA_DATABASE_URL or self.DATABASE_URL
 
     @staticmethod
     def _normalize_scheme(url: str, target_scheme: str) -> str:
@@ -76,8 +82,8 @@ class DatabaseSettings(EnvBase):
     @property
     def database_url(self) -> str:
         """Async URL for SQLAlchemy (asyncpg)."""
-        if self.DATABASE_URL:
-            return self._normalize_scheme(self.DATABASE_URL, "postgresql+asyncpg")
+        if self._resolved_database_url:
+            return self._normalize_scheme(self._resolved_database_url, "postgresql+asyncpg")
         return (
             f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@"
             f"{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
@@ -87,8 +93,8 @@ class DatabaseSettings(EnvBase):
     @property
     def database_url_sync(self) -> str:
         """Sync URL for LangGraph/Psycopg (postgresql://)."""
-        if self.DATABASE_URL:
-            return self._normalize_scheme(self.DATABASE_URL, "postgresql")
+        if self._resolved_database_url:
+            return self._normalize_scheme(self._resolved_database_url, "postgresql")
         return (
             f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@"
             f"{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"

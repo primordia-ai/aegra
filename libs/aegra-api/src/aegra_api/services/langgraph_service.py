@@ -89,14 +89,17 @@ class LangGraphService:
         graphs_config = self.config.get("graphs", {})
 
         for graph_id, graph_path in graphs_config.items():
-            # Parse path format: "./graphs/weather_agent.py:graph"
+            # Parse path format: "./graphs/weather_agent.py:graph" or "module.path:graph"
             if ":" not in graph_path:
                 raise ValueError(f"Invalid graph path format: {graph_path}")
 
-            file_path, export_name = graph_path.split(":", 1)
+            path_part, export_name = graph_path.split(":", 1)
+            # Detect module-style path: no path separators and no .py extension
+            is_module = "/" not in path_part and "\\" not in path_part and not path_part.endswith(".py")
             self._graph_registry[graph_id] = {
-                "file_path": file_path,
+                "file_path": path_part,
                 "export_name": export_name,
+                "is_module": is_module,
             }
 
     def _setup_dependencies(self) -> None:
@@ -265,10 +268,25 @@ class LangGraphService:
         return await self._get_base_graph(graph_id)
 
     async def _load_graph_from_file(self, graph_id: str, graph_info: dict[str, str]):
-        """Load graph from filesystem.
+        """Load graph from filesystem or module path.
 
-        Paths are resolved relative to the config file's directory.
+        Supports both file paths (./path/to/file.py:var) and module paths (pkg.mod:var).
         """
+        # Module-style path: use importlib.import_module directly
+        if graph_info.get("is_module"):
+            module_name = graph_info["file_path"]
+            export_name = graph_info["export_name"]
+            try:
+                module = importlib.import_module(module_name)
+            except ImportError as e:
+                raise ValueError(f"Failed to import graph module '{module_name}': {e}") from e
+            if not hasattr(module, export_name):
+                raise ValueError(f"Graph export not found: {export_name} in {module_name}")
+            graph = getattr(module, export_name)
+            if callable(graph):
+                graph = await graph()
+            return graph
+
         raw_path = graph_info["file_path"]
         file_path = Path(raw_path)
 
@@ -280,7 +298,18 @@ class LangGraphService:
             raise ValueError(f"Graph file not found: {file_path}")
 
         # Dynamic import of graph module
-        spec = importlib.util.spec_from_file_location(f"graphs.{graph_id}", str(file_path.resolve()))
+        # Derive module name from file path relative to sys.path so that
+        # relative imports within the module work correctly.
+        resolved = file_path.resolve()
+        module_name = f"graphs.{graph_id}"  # fallback
+        for sys_path_entry in sys.path:
+            try:
+                rel = resolved.relative_to(Path(sys_path_entry).resolve())
+                module_name = str(rel.with_suffix("")).replace("/", ".").replace("\\", ".")
+                break
+            except ValueError:
+                continue
+        spec = importlib.util.spec_from_file_location(module_name, str(resolved))
         if spec is None or spec.loader is None:
             raise ValueError(f"Failed to load graph module: {file_path}")
 
@@ -423,9 +452,6 @@ def create_run_config(
     # Merge server-provided fields (do NOT overwrite if client already set)
     cfg["configurable"].setdefault("thread_id", thread_id)
     cfg["configurable"].setdefault("run_id", run_id)
-
-    # Ensure LangChain's root run ID is set to match so that astream_events recognizes it
-    cfg.setdefault("run_id", run_id)
 
     # Add observability callbacks from various potential sources
     tracing_callbacks = get_tracing_callbacks()

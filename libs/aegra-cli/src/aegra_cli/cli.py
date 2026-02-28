@@ -37,7 +37,7 @@ except ImportError:
 def cli():
     """Aegra CLI - Manage your self-hosted agent deployments.
 
-    Aegra is an open-source, self-hosted alternative to LangSmith Deployments.
+    Aegra is an open-source, self-hosted alternative to LangGraph Platform.
     Use this CLI to run development servers, manage Docker services, and more.
     """
     pass
@@ -299,6 +299,17 @@ def dev(
         str(port),
         "--reload",
     ]
+
+    # Add --reload-exclude entries from aegra.json dev.reload_exclude
+    if resolved_config and resolved_config.exists():
+        try:
+            import json as _json
+            with resolved_config.open() as _f:
+                _cfg = _json.load(_f)
+            for _excl in _cfg.get("dev", {}).get("reload_exclude", []):
+                cmd += ["--reload-exclude", _excl]
+        except Exception:
+            pass
 
     process = None
     try:
