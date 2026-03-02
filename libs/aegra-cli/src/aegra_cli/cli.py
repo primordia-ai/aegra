@@ -300,12 +300,14 @@ def dev(
         "--reload",
     ]
 
-    # Add --reload-exclude entries from aegra.json dev.reload_exclude
+    # Add --reload-dir / --reload-exclude entries from aegra.json dev config
     if resolved_config and resolved_config.exists():
         try:
             import json as _json
             with resolved_config.open() as _f:
                 _cfg = _json.load(_f)
+            for _dir in _cfg.get("dev", {}).get("reload_dirs", []):
+                cmd += ["--reload-dir", _dir]
             for _excl in _cfg.get("dev", {}).get("reload_exclude", []):
                 cmd += ["--reload-exclude", _excl]
         except Exception:

@@ -889,12 +889,39 @@ class TestLoadEnvFile:
 
 
 class TestDevReloadExclude:
-    """Tests for dev.reload_exclude config in aegra.json."""
+    """Tests for dev.reload_exclude and dev.reload_dirs config in aegra.json."""
+
+    def test_dev_reload_dirs_passed_to_uvicorn(self, cli_runner: CliRunner, tmp_path: Path) -> None:
+        """reload_dirs entries from aegra.json are passed as --reload-dir to uvicorn."""
+        with cli_runner.isolated_filesystem(temp_dir=tmp_path):
+            Path("aegra.json").write_text('{"graphs": {}, "dev": {"reload_dirs": ["src", "agents"]}}')
+
+            with patch("aegra_cli.cli.subprocess.Popen") as mock_popen:
+                mock_popen.return_value = create_mock_popen(0)
+                cli_runner.invoke(cli, ["dev", "--no-db-check"])
+
+                call_args = mock_popen.call_args[0][0]
+                dir_indices = [i for i, v in enumerate(call_args) if v == "--reload-dir"]
+                dir_values = [call_args[i + 1] for i in dir_indices]
+                assert "src" in dir_values
+                assert "agents" in dir_values
+
+    def test_dev_no_reload_dirs_when_config_omitted(self, cli_runner: CliRunner, tmp_path: Path) -> None:
+        """No --reload-dir flags when dev.reload_dirs is absent."""
+        with cli_runner.isolated_filesystem(temp_dir=tmp_path):
+            Path("aegra.json").write_text('{"graphs": {}}')
+
+            with patch("aegra_cli.cli.subprocess.Popen") as mock_popen:
+                mock_popen.return_value = create_mock_popen(0)
+                cli_runner.invoke(cli, ["dev", "--no-db-check"])
+
+                call_args = mock_popen.call_args[0][0]
+                assert "--reload-dir" not in call_args
 
     def test_dev_reload_exclude_passed_to_uvicorn(self, cli_runner: CliRunner, tmp_path: Path) -> None:
         """reload_exclude entries from aegra.json are passed as --reload-exclude to uvicorn."""
         with cli_runner.isolated_filesystem(temp_dir=tmp_path):
-            Path("aegra.json").write_text('{"graphs": {}, "dev": {"reload_exclude": ["data"]}}')
+            Path("aegra.json").write_text('{"graphs": {}, "dev": {"reload_exclude": ["data/**"]}}')
 
             with patch("aegra_cli.cli.subprocess.Popen") as mock_popen:
                 mock_popen.return_value = create_mock_popen(0)
@@ -903,7 +930,7 @@ class TestDevReloadExclude:
                 call_args = mock_popen.call_args[0][0]
                 assert "--reload-exclude" in call_args
                 idx = call_args.index("--reload-exclude")
-                assert call_args[idx + 1] == "data"
+                assert call_args[idx + 1] == "data/**"
 
     def test_dev_reload_exclude_multiple_entries(self, cli_runner: CliRunner, tmp_path: Path) -> None:
         """Multiple reload_exclude entries each produce a --reload-exclude flag."""
