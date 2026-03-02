@@ -65,7 +65,7 @@ def _log_connection_help(error: Exception) -> None:
         "Troubleshooting tips:\n"
         "  - Local development?  Run 'aegra dev' (starts PostgreSQL automatically)\n"
         "  - Docker deployment?  Run 'aegra up' (starts PostgreSQL + app)\n"
-        "  - External database?  Check DATABASE_URL or POSTGRES_* vars in your .env\n"
+        "  - External database?  Set AEGRA_DATABASE_URL (preferred) or DATABASE_URL / POSTGRES_* vars in your .env\n"
         "  - Missing .env file?  Copy .env.example to .env and configure it"
     )
 
