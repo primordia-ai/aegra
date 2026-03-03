@@ -116,6 +116,7 @@ class TestOpenTelemetryProviderSetup:
             # Setup defaults
             mock_settings.observability.OTEL_SERVICE_NAME = "test-service"
             mock_settings.observability.OTEL_CONSOLE_EXPORT = False  # Default to False to prevent noise
+            mock_settings.observability.OTEL_MAX_EXPORT_BATCH_SIZE = 512
             mock_settings.app.VERSION = "1.0.0"
             mock_settings.app.ENV_MODE = "TEST"
 
@@ -178,7 +179,7 @@ class TestOpenTelemetryProviderSetup:
         provider.setup()
 
         mock_target.get_exporter.assert_called_once()
-        mock_deps["bsp"].assert_any_call(mock_exporter)
+        mock_deps["bsp"].assert_any_call(mock_exporter, max_export_batch_size=512)
         tracer_provider_instance = mock_deps["tp"].return_value
         tracer_provider_instance.add_span_processor.assert_called()
 
@@ -211,7 +212,7 @@ class TestOpenTelemetryProviderSetup:
             # Should still add processor for good target
             tracer_provider_instance = mock_deps["tp"].return_value
             # Now this will be the ONLY call to BatchSpanProcessor
-            mock_deps["bsp"].assert_called_with(good_exporter)
+            mock_deps["bsp"].assert_called_with(good_exporter, max_export_batch_size=512)
             tracer_provider_instance.add_span_processor.assert_called_once()
 
     def test_setup_instruments_globally(self, mock_deps):

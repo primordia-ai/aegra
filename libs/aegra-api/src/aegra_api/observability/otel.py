@@ -88,11 +88,12 @@ class OpenTelemetryProvider(ObservabilityProvider):
         processors_count = 0
 
         # 2. Attach Exporters
+        batch_size = settings.observability.OTEL_MAX_EXPORT_BATCH_SIZE
         for target in self._active_targets:
             try:
                 exporter = target.get_exporter()
                 if exporter:
-                    processor = BatchSpanProcessor(exporter)
+                    processor = BatchSpanProcessor(exporter, max_export_batch_size=batch_size)
                     self._tracer_provider.add_span_processor(processor)
                     processors_count += 1
                     logger.info(f"Observability: Attached target '{target.name}'")
@@ -101,7 +102,7 @@ class OpenTelemetryProvider(ObservabilityProvider):
 
         # 3. Console Exporter
         if settings.observability.OTEL_CONSOLE_EXPORT:
-            self._tracer_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+            self._tracer_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter(), max_export_batch_size=batch_size))
             processors_count += 1
             logger.info("Observability: Console export enabled")
 

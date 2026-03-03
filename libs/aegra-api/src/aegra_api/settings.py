@@ -121,6 +121,7 @@ class ObservabilitySettings(EnvBase):
     OTEL_SERVICE_NAME: str = "aegra-backend"
     OTEL_TARGETS: str = ""  # Comma-separated: "LANGFUSE,PHOENIX"
     OTEL_CONSOLE_EXPORT: bool = False  # For local debugging
+    OTEL_MAX_EXPORT_BATCH_SIZE: int = 512  # Spans per HTTP POST; lower (e.g. 32) if hitting 413s from nginx
 
     # --- Generic OTLP Target (Default/Custom) ---
     OTEL_EXPORTER_OTLP_ENDPOINT: str | None = None
