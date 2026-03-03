@@ -88,8 +88,10 @@ class TestRunsStreamingEndpoints:
             assert response.headers["Content-Type"] == "text/event-stream"
             assert f"/runs/{run_id}" in response.headers["Location"]
 
-            # Verify streaming service called
+            # Verify streaming service called with cancel_on_disconnect=False (default: continue)
             mock_stream_exec.assert_called_once()
+            call_kwargs = mock_stream_exec.call_args
+            assert call_kwargs[1]["cancel_on_disconnect"] is False, "Default on_disconnect should be 'continue' (cancel_on_disconnect=False)"
 
             # Verify DB interactions
             mock_session.add.assert_called_once()
@@ -97,6 +99,49 @@ class TestRunsStreamingEndpoints:
 
             # Verify background task creation
             mock_create_task.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_and_stream_run_cancel_on_disconnect(
+        self,
+        mock_user: User,
+        mock_session: AsyncMock,
+        sample_assistant: AssistantORM,
+    ) -> None:
+        """Test that on_disconnect='cancel' sets cancel_on_disconnect=True."""
+        thread_id = "test-thread-123"
+        run_id = str(uuid4())
+
+        request = RunCreate(
+            assistant_id="test-assistant",
+            input={"message": "stream me"},
+            stream_mode=["events"],
+            on_disconnect="cancel",
+        )
+
+        with (
+            patch("aegra_api.api.runs._validate_resume_command", new_callable=AsyncMock),
+            patch("aegra_api.api.runs.get_langgraph_service") as mock_lg_service,
+            patch("aegra_api.api.runs.resolve_assistant_id", return_value="test-assistant"),
+            patch("aegra_api.api.runs.update_thread_metadata", new_callable=AsyncMock),
+            patch("aegra_api.api.runs.set_thread_status", new_callable=AsyncMock),
+            patch("aegra_api.api.runs.uuid4", return_value=run_id),
+            patch("aegra_api.api.runs.asyncio.create_task"),
+            patch("aegra_api.api.runs.active_runs", {}),
+            patch("aegra_api.api.runs.streaming_service.stream_run_execution") as mock_stream_exec,
+            patch("aegra_api.api.runs.execute_run_async", new_callable=MagicMock),
+        ):
+            mock_lg_service.return_value.list_graphs.return_value = ["test-graph"]
+            mock_session.scalar.return_value = sample_assistant
+
+            async def mock_generator() -> AsyncGenerator:
+                yield "data"
+
+            mock_stream_exec.return_value = mock_generator()
+
+            await create_and_stream_run(thread_id, request, mock_user, mock_session)
+
+            call_kwargs = mock_stream_exec.call_args
+            assert call_kwargs[1]["cancel_on_disconnect"] is True, "on_disconnect='cancel' should set cancel_on_disconnect=True"
 
     @pytest.mark.asyncio
     async def test_stream_run_success(self, mock_user: User, mock_session: AsyncMock) -> None:

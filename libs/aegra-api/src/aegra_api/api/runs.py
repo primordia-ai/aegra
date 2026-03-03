@@ -408,10 +408,10 @@ async def create_and_stream_run(
         stream_mode = config["stream_mode"]
 
     # Stream immediately from broker (which will also include replay of any early events)
-    # Default to cancel on disconnect - this matches user expectation that clicking
-    # "Cancel" in the frontend will stop the backend task. Users can explicitly
-    # set on_disconnect="continue" if they want the task to continue.
-    cancel_on_disconnect = (request.on_disconnect or "cancel").lower() == "cancel"
+    # Default to continue on disconnect - runs are long-lived and a dropped SSE connection
+    # should not kill in-progress work. Callers can explicitly set on_disconnect="cancel"
+    # to cancel the background task when the client disconnects.
+    cancel_on_disconnect = (request.on_disconnect or "continue").lower() == "cancel"
 
     return StreamingResponse(
         streaming_service.stream_run_execution(
