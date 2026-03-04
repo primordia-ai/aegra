@@ -129,11 +129,11 @@ def clear_auth_cache():
     test isolation issues when different tests need different auth configurations.
     This fixture ensures each test starts with a clean auth state.
     """
-    from aegra_api.core.auth_middleware import get_auth_instance
+    from aegra_api.core.auth_middleware import get_auth_backend
 
-    get_auth_instance.cache_clear()
+    get_auth_backend.cache_clear()
     yield
-    get_auth_instance.cache_clear()
+    get_auth_backend.cache_clear()
 
 
 # --- AUTO-SKIP GEO-BLOCK FAILURES ---

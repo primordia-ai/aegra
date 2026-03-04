@@ -382,6 +382,10 @@ class TestLangGraphAuthBackend:
 class TestGetAuthBackend:
     """Test get_auth_backend function"""
 
+    def setup_method(self):
+        """Clear lru_cache before each test so AUTH_TYPE patches take effect."""
+        get_auth_backend.cache_clear()
+
     def test_get_auth_backend_noop(self):
         """Test getting auth backend with noop type"""
         with patch.dict(os.environ, {"AUTH_TYPE": "noop"}):
@@ -405,6 +409,13 @@ class TestGetAuthBackend:
         with patch.dict(os.environ, {}, clear=True):
             backend = get_auth_backend()
             assert isinstance(backend, LangGraphAuthBackend)
+
+    def test_get_auth_backend_returns_same_instance(self):
+        """Test that get_auth_backend returns the same cached instance on repeated calls."""
+        with patch.dict(os.environ, {"AUTH_TYPE": "custom"}):
+            backend1 = get_auth_backend()
+            backend2 = get_auth_backend()
+            assert backend1 is backend2
 
 
 class TestOnAuthError:
