@@ -97,6 +97,7 @@ testpaths = ["tests"]
 markers = [
     "unit: unit tests",
     "e2e: end-to-end tests requiring a running server",
+    "db: integration tests requiring a real Postgres instance (set AEGRA_TEST_DATABASE_URL)",
 ]
 
 [dependency-groups]

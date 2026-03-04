@@ -1,6 +1,8 @@
 import pytest
 
-from tests.e2e._utils import elog, get_e2e_client
+import sqlalchemy as sa
+
+from tests.e2e._utils import elog, get_e2e_client, get_sync_db_engine
 
 
 @pytest.mark.e2e
@@ -108,6 +110,17 @@ async def test_thread_deletion_with_completed_runs():
     except Exception:
         # Expected - thread should be gone
         pass
+
+    # 7. Verify checkpoint rows were cascade-deleted from the DB
+    with get_sync_db_engine() as engine:
+        with engine.connect() as conn:
+            for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
+                count = conn.execute(
+                    sa.text(f"SELECT count(*) FROM {table} WHERE thread_id = :tid"),  # noqa: S608
+                    {"tid": thread_id},
+                ).scalar()
+                assert count == 0, f"Expected 0 rows in {table} after thread delete, got {count}"
+    elog("Checkpoint rows cascade-deleted from DB", {"thread_id": thread_id})
 
 
 @pytest.mark.e2e

@@ -185,6 +185,21 @@ def _wait_for_docker_ready(timeout_seconds: int = 60) -> bool:
     return False
 
 
+def is_postgres_port_open(host: str = "localhost", port: int = 5432) -> bool:
+    """Check if a Postgres-compatible server is already accepting TCP connections.
+
+    Returns True if *any* process is listening on the given host/port, regardless
+    of which Docker project (or native install) owns it.
+    """
+    import socket
+
+    try:
+        with socket.create_connection((host, port), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
 def is_postgres_container_running(compose_file: Path | None = None) -> bool:
     """Check if PostgreSQL container is running.
 
@@ -329,11 +344,19 @@ def ensure_postgres_running(compose_file: Path | None = None) -> bool:
 
     console.print(f"[dim]Using compose file: {compose_file}[/dim]")
 
-    # Step 4: Check if PostgreSQL container is already running
+    # Step 4: Check if PostgreSQL is already accepting connections on port 5432.
+    # This handles the case where Postgres is running via a different compose project
+    # (e.g. another repo's container), which would cause a port conflict if we tried
+    # to start our own container.
+    if is_postgres_port_open():
+        console.print("[green]PostgreSQL is already running.[/green]")
+        return True
+
+    # Step 5: Check if PostgreSQL container is already running under this compose project
     if is_postgres_container_running(compose_file):
         console.print("[green]PostgreSQL is already running.[/green]")
         return True
 
-    # Step 5: Start PostgreSQL container
+    # Step 6: Start PostgreSQL container
     console.print("\n[yellow]PostgreSQL is not running.[/yellow]")
     return start_postgres_container(compose_file)

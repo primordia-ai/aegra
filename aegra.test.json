@@ -1,0 +1,6 @@
+{
+  "dependencies": ["./examples"],
+  "graphs": {
+    "agent": "./examples/react_agent/__init__.py:graph"
+  }
+}

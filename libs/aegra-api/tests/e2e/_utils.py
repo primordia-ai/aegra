@@ -1,7 +1,9 @@
 import json
+from contextlib import contextmanager
 
 import httpx
 import pytest
+import sqlalchemy as sa
 
 from aegra_api.settings import settings
 
@@ -20,6 +22,32 @@ def elog(title: str, payload):
     except Exception:
         formatted = str(payload)
     print(f"\n=== {title} ===\n{formatted}\n")
+
+
+@contextmanager
+def get_sync_db_engine():
+    """Yield a synchronous SQLAlchemy engine connected to the same DB as the running server.
+
+    Use this in e2e tests to make direct DB assertions (e.g. verify cascade deletes).
+    Reads DB credentials from the environment at call time to avoid stale settings singletons.
+    """
+    import os
+    raw = (
+        os.environ.get("AEGRA_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
+        or settings.db.database_url_sync
+    )
+    # Normalise to a synchronous psycopg URL
+    sync_url = (
+        raw
+        .replace("postgresql+asyncpg://", "postgresql+psycopg://")
+        .replace("postgresql://", "postgresql+psycopg://")
+    )
+    engine = sa.create_engine(sync_url)
+    try:
+        yield engine
+    finally:
+        engine.dispose()
 
 
 def get_e2e_client():

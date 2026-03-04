@@ -11,6 +11,7 @@ wheels/
 
 # env files
 .env
+.env.local
 
 # Pycharm
 .idea/
