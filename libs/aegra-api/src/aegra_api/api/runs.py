@@ -1033,6 +1033,7 @@ async def execute_run_async(
 
     except asyncio.CancelledError:
         from aegra_api.main import _draining
+
         if _draining:
             # Graceful drain: re-queue as pending so the startup sweep on the
             # next pod restarts this run from the last LangGraph checkpoint.

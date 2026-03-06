@@ -1,6 +1,7 @@
 {
   "dependencies": ["./examples"],
   "graphs": {
-    "agent": "./examples/react_agent/__init__.py:graph"
+    "agent": "./examples/react_agent/__init__.py:graph",
+    "sleep_agent": "./examples/sleep_agent/graph.py:graph"
   }
 }

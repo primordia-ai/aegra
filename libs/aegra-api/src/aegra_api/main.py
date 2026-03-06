@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute, APIRouter
 
 from aegra_api.api.assistants import router as assistants_router
-from aegra_api.api.runs import router as runs_router
+from aegra_api.api.runs import active_runs, router as runs_router
 from aegra_api.api.stateless_runs import router as stateless_runs_router
 from aegra_api.api.store import router as store_router
 from aegra_api.api.threads import router as threads_router
@@ -36,23 +36,35 @@ from aegra_api.settings import settings
 from aegra_api.startup_recovery import recover_stale_runs
 from aegra_api.utils.setup_logging import setup_logging
 
-# Task management for run cancellation
-active_runs: dict[str, asyncio.Task] = {}
-
 # Graceful drain flag — set on SIGTERM so new runs are rejected and
 # CancelledError is treated as a retriable pending rather than an error.
 _draining: bool = False
 
 
 def _handle_sigterm() -> None:
-    """Set the drain flag when SIGTERM is received.
+    """Set the drain flag and cancel active runs when SIGTERM is received.
 
     Called by the asyncio event loop's add_signal_handler() so it runs on the
-    main thread without interrupting async execution.
+    main thread without interrupting async execution.  We schedule the actual
+    cancellation+await as a new task so the CancelledError handlers can finish
+    their DB writes before uvicorn tears down the event loop.
     """
     global _draining
     _draining = True
     logger.warning("[shutdown] SIGTERM received — draining: new runs rejected, active runs will be re-queued on restart")
+
+
+async def _drain_active_runs() -> None:
+    """Cancel all active run tasks and wait for their CancelledError handlers to complete."""
+    logger.info(f"[shutdown] _drain_active_runs: active_runs has {len(active_runs)} entries")
+    tasks = [t for t in active_runs.values() if not t.done()]
+    if not tasks:
+        logger.info("[shutdown] _drain_active_runs: no active tasks to cancel")
+        return
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    logger.info(f"[shutdown] drained {len(tasks)} active run(s)")
 
 OPENAPI_TAGS: list[dict[str, Any]] = [
     {"name": "Assistants", "description": "A configured instance of a graph."},
@@ -116,16 +128,29 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Recover any runs left in a non-terminal state by a previous pod crash
     await recover_stale_runs()
 
-    # Register SIGTERM handler for graceful drain
-    import signal
-    asyncio.get_event_loop().add_signal_handler(signal.SIGTERM, _handle_sigterm)
+    # Chain our SIGTERM handler with uvicorn's so _draining is set immediately
+    # on SIGTERM (enabling the 503 gate) while uvicorn's should_exit is also set.
+    import signal as _signal
+    _uvicorn_sigterm = _signal.getsignal(_signal.SIGTERM)
+
+    def _chained_sigterm(sig: int, frame: object) -> None:
+        global _draining
+        _draining = True
+        logger.warning("[shutdown] SIGTERM received — draining: new runs rejected, active runs will be re-queued on restart")
+        if callable(_uvicorn_sigterm):
+            _uvicorn_sigterm(sig, frame)
+
+    _signal.signal(_signal.SIGTERM, _chained_sigterm)
 
     yield
 
-    # Shutdown: Clean up connections and cancel active runs
-    for task in active_runs.values():
-        if not task.done():
-            task.cancel()
+    # Mark draining so CancelledError handlers write 'pending' instead of 'interrupted'.
+    # This also covers the case where uvicorn overwrites our signal handler.
+    global _draining
+    _draining = True
+
+    # Cancel active runs and await their CancelledError handlers so DB writes complete.
+    await _drain_active_runs()
 
     # Stop event store cleanup task
     await event_store.stop_cleanup_task()
