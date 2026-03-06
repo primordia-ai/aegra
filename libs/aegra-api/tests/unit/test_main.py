@@ -42,6 +42,7 @@ async def test_lifespan_registers_otel_provider(monkeypatch):
         patch("aegra_api.main.db_manager") as mock_db_manager,
         patch("aegra_api.main.get_langgraph_service") as mock_get_langgraph_service,
         patch("aegra_api.main.event_store") as mock_event_store,
+        patch("aegra_api.main.recover_stale_runs", new_callable=AsyncMock),
     ):
         mock_db_manager.initialize = AsyncMock()
         mock_db_manager.close = AsyncMock()
@@ -84,6 +85,7 @@ async def test_lifespan_calls_required_initialization():
         patch("aegra_api.main.event_store") as mock_event_store,
         # Patch the new setup_observability function directly
         patch("aegra_api.main.setup_observability") as mock_setup_observability,
+        patch("aegra_api.main.recover_stale_runs", new_callable=AsyncMock) as mock_recover,
     ):
         # Setup mocks
         mock_db_manager.initialize = AsyncMock()

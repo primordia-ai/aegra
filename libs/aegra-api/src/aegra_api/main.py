@@ -32,6 +32,7 @@ from aegra_api.models.errors import AgentProtocolError, get_error_type
 from aegra_api.observability.setup import setup_observability
 from aegra_api.services.event_store import event_store
 from aegra_api.services.langgraph_service import get_langgraph_service
+from aegra_api.startup_recovery import recover_stale_runs
 from aegra_api.settings import settings
 from aegra_api.utils.setup_logging import setup_logging
 
@@ -96,6 +97,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     # Initialize event store cleanup task
     await event_store.start_cleanup_task()
+
+    # Recover any runs left in a non-terminal state by a previous pod crash
+    await recover_stale_runs()
 
     yield
 
