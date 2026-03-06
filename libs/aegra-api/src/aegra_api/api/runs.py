@@ -167,6 +167,14 @@ async def create_run(
     endpoint to follow progress. Provide either `input` or `command` (for
     human-in-the-loop resumption) but not both.
     """
+    # Reject new runs during graceful drain (SIGTERM received)
+    from aegra_api.main import _draining
+    if _draining:
+        raise HTTPException(
+            status_code=503,
+            detail="Server is shutting down — new runs are not accepted. Retry on another instance.",
+        )
+
     # Authorization check (create_run action on threads resource)
     ctx = build_auth_context(user, "threads", "create_run")
     value = {**request.model_dump(), "thread_id": thread_id}
@@ -1024,11 +1032,21 @@ async def execute_run_async(
             await set_thread_status(session, thread_id, "idle")
 
     except asyncio.CancelledError:
-        # Store empty output to avoid JSON serialization issues - use standard status
-        await update_run_status(run_id, "interrupted", output={}, session=session)
-        if not session:
-            raise RuntimeError(f"No database session available to update thread {thread_id} status") from None
-        await set_thread_status(session, thread_id, "idle")
+        from aegra_api.main import _draining
+        if _draining:
+            # Graceful drain: re-queue as pending so the startup sweep on the
+            # next pod restarts this run from the last LangGraph checkpoint.
+            await update_run_status(run_id, "pending", output={}, session=session)
+            if not session:
+                raise RuntimeError(f"No database session available to update thread {thread_id} status") from None
+            await set_thread_status(session, thread_id, "busy")
+            logger.info(f"[execute_run_async] run re-queued as pending for restart run_id={run_id}")
+        else:
+            # Hard cancel (not a graceful drain) — mark interrupted as before.
+            await update_run_status(run_id, "interrupted", output={}, session=session)
+            if not session:
+                raise RuntimeError(f"No database session available to update thread {thread_id} status") from None
+            await set_thread_status(session, thread_id, "idle")
         # Signal cancellation to broker
         await streaming_service.signal_run_cancelled(run_id)
         raise
