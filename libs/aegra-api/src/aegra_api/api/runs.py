@@ -32,6 +32,7 @@ from aegra_api.services.streaming_service import streaming_service
 from aegra_api.utils.assistants import resolve_assistant_id
 from aegra_api.utils.run_utils import (
     _merge_jsonb,
+    sanitize_for_db,
 )
 from aegra_api.utils.status_compat import validate_run_status
 
@@ -243,6 +244,10 @@ async def create_run(
     await update_thread_metadata(session, thread_id, assistant.assistant_id, assistant.graph_id, user.identity)
     await set_thread_status(session, thread_id, "busy")
 
+    # Sanitize inputs for DB compatibility
+    sanitized_input = sanitize_for_db(request.input or {})
+    sanitized_config = sanitize_for_db(config)
+
     # Persist run record via ORM model in core.orm (Run table)
     now = datetime.now(UTC)
     run_orm = RunORM(
@@ -250,8 +255,8 @@ async def create_run(
         thread_id=thread_id,
         assistant_id=resolved_assistant_id,
         status="pending",
-        input=request.input or {},
-        config=config,
+        input=sanitized_input,
+        config=sanitized_config,
         context=context,
         user_id=user.identity,
         created_at=now,
@@ -272,9 +277,9 @@ async def create_run(
             run_id,
             thread_id,
             assistant.graph_id,
-            request.input or {},
+            sanitized_input,
             user,
-            config,
+            sanitized_config,
             context,
             request.stream_mode,
             None,  # Don't pass session to avoid conflicts
@@ -364,6 +369,10 @@ async def create_and_stream_run(
     await update_thread_metadata(session, thread_id, assistant.assistant_id, assistant.graph_id, user.identity)
     await set_thread_status(session, thread_id, "busy")
 
+    # Sanitize inputs for DB compatibility
+    sanitized_input = sanitize_for_db(request.input or {})
+    sanitized_config = sanitize_for_db(config)
+
     # Persist run record
     now = datetime.now(UTC)
     run_orm = RunORM(
@@ -371,8 +380,8 @@ async def create_and_stream_run(
         thread_id=thread_id,
         assistant_id=resolved_assistant_id,
         status="running",
-        input=request.input or {},
-        config=config,
+        input=sanitized_input,
+        config=sanitized_config,
         context=context,
         user_id=user.identity,
         created_at=now,
@@ -393,9 +402,9 @@ async def create_and_stream_run(
             run_id,
             thread_id,
             assistant.graph_id,
-            request.input or {},
+            sanitized_input,
             user,
-            config,
+            sanitized_config,
             context,
             request.stream_mode,
             None,  # Don't pass session to avoid conflicts
@@ -686,6 +695,10 @@ async def wait_for_run(
         await update_thread_metadata(session, thread_id, assistant.assistant_id, assistant.graph_id, user.identity)
         await set_thread_status(session, thread_id, "busy")
 
+        # Sanitize inputs for DB compatibility
+        sanitized_input = sanitize_for_db(request.input or {})
+        sanitized_config = sanitize_for_db(config)
+
         # Persist run record
         now = datetime.now(UTC)
         run_orm = RunORM(
@@ -693,8 +706,8 @@ async def wait_for_run(
             thread_id=thread_id,
             assistant_id=resolved_assistant_id,
             status="pending",
-            input=request.input or {},
-            config=config,
+            input=sanitized_input,
+            config=sanitized_config,
             context=context,
             user_id=user.identity,
             created_at=now,
@@ -716,9 +729,9 @@ async def wait_for_run(
             run_id,
             thread_id,
             graph_id,
-            request.input or {},
+            sanitized_input,
             user,
-            config,
+            sanitized_config,
             context,
             request.stream_mode,
             None,  # Don't pass session to avoid conflicts
@@ -1099,10 +1112,13 @@ async def update_run_status(
     try:
         values = {"status": validated_status, "updated_at": datetime.now(UTC)}
         if output is not None:
-            # Serialize output to ensure JSON compatibility
+            # Serialize and sanitize output for DB compatibility
             try:
+                # 1. Serialize first to JSON-compatible primitives
                 serialized_output = serializer.serialize(output)
-                values["output"] = serialized_output
+                # 2. Sanitize resulting primitives to remove bad characters
+                sanitized_output = sanitize_for_db(serialized_output)
+                values["output"] = sanitized_output
             except Exception as e:
                 logger.warning(f"Failed to serialize output for run {run_id}: {e}")
                 values["output"] = {
@@ -1110,7 +1126,8 @@ async def update_run_status(
                     "original_type": str(type(output)),
                 }
         if error is not None:
-            values["error_message"] = error
+            # Sanitize error message as well
+            values["error_message"] = sanitize_for_db(error)
         logger.info(f"[update_run_status] updating DB run_id={run_id} status={validated_status}")
         await session.execute(update(RunORM).where(RunORM.run_id == str(run_id)).values(**values))  # type: ignore[arg-type]
         await session.commit()

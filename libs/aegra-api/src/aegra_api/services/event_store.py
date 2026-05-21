@@ -11,6 +11,8 @@ from psycopg.types.json import Jsonb
 from aegra_api.core.database import db_manager
 from aegra_api.core.serializers import GeneralSerializer
 from aegra_api.core.sse import SSEEvent
+from aegra_api.utils.run_utils import sanitize_for_db
+
 
 logger = structlog.get_logger(__name__)
 
@@ -182,15 +184,26 @@ event_store = EventStore()
 
 
 async def store_sse_event(run_id: str, event_id: str, event_type: str, data: dict) -> SSEEvent:
-    """Store SSE event with proper serialization"""
+    """Store SSE event with proper serialization and sanitization"""
     serializer = GeneralSerializer()
 
     # Ensure JSONB-safe data by serializing complex objects
     try:
-        safe_data = json.loads(json.dumps(data, default=serializer.serialize))
+        # 1. Serialize complex objects to JSON-compatible primitives
+        serialized_data = serializer.serialize(data)
+        # 2. Sanitize the resulting primitives for DB compatibility
+        safe_data = sanitize_for_db(serialized_data)
+        
+        # Verify JSON compatibility (though safe_data should already be safe)
+        # We use json.dumps/loads as a final pass to ensure it's a plain dict/list
+        safe_data = json.loads(json.dumps(safe_data, default=str))
     except Exception:
         # Fallback to stringifying as a last resort to avoid crashing the run
-        safe_data = {"raw": str(data)}
+        # Sanitize the string version too if possible
+        try:
+            safe_data = {"raw": sanitize_for_db(str(data))}
+        except Exception:
+            safe_data = {"raw": "sanitization failed"}
     event = SSEEvent(id=event_id, event=event_type, data=safe_data, timestamp=datetime.now(UTC))
     await event_store.store_event(run_id, event)
     return event

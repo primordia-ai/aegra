@@ -1,6 +1,32 @@
 import copy
 from typing import Any
 
+
+def sanitize_for_db(obj: Any) -> Any:
+    """Recursively remove NUL bytes (\\u0000) and unpaired surrogates from objects.
+
+    PostgreSQL jsonb and text columns do not support NUL bytes in strings and
+    will raise UntranslatableCharacter errors. Unpaired surrogates also cause
+    encoding errors when sending data to the database.
+    """
+    if isinstance(obj, str):
+        # Remove NUL bytes and strip unpaired surrogates by re-encoding to UTF-8
+        return obj.replace("\u0000", "").encode("utf-8", "ignore").decode("utf-8")
+    elif isinstance(obj, bytes):
+        # Decode bytes to string, ignoring errors and removing NUL bytes
+        try:
+            return obj.decode("utf-8", "ignore").replace("\u0000", "")
+        except Exception:
+            return str(obj)
+    elif isinstance(obj, dict):
+        return {k: sanitize_for_db(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_for_db(v) for v in obj]
+    elif isinstance(obj, tuple):
+        return tuple(sanitize_for_db(v) for v in obj)
+    return obj
+
+
 import structlog
 
 logger = structlog.getLogger(__name__)
