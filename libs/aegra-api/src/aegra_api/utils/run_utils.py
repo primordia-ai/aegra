@@ -1,14 +1,24 @@
 import copy
+import math
 from typing import Any
 
 
 def sanitize_for_db(obj: Any) -> Any:
-    """Recursively remove NUL bytes (\\u0000) and unpaired surrogates from objects.
+    """Recursively sanitize objects for safe PostgreSQL JSON persistence.
 
-    PostgreSQL jsonb and text columns do not support NUL bytes in strings and
-    will raise UntranslatableCharacter errors. Unpaired surrogates also cause
-    encoding errors when sending data to the database.
+    Removes / coerces values that PostgreSQL's json/jsonb (and text) input
+    rejects:
+
+    - NUL bytes (\\u0000) in strings — raise UntranslatableCharacter.
+    - Unpaired surrogates in strings — cause encoding errors on send.
+    - Non-finite floats (NaN, +Infinity, -Infinity) — json.dumps emits the bare
+      tokens ``NaN`` / ``Infinity`` (it defaults to ``allow_nan=True``), which
+      Postgres rejects with InvalidTextRepresentation ("Token \"NaN\" is
+      invalid"). These are coerced to ``None`` (JSON null).
     """
+    if isinstance(obj, float):
+        # bool is not a float, so booleans are unaffected. NaN/Inf -> null.
+        return obj if math.isfinite(obj) else None
     if isinstance(obj, str):
         # Remove NUL bytes and strip unpaired surrogates by re-encoding to UTF-8
         return obj.replace("\u0000", "").encode("utf-8", "ignore").decode("utf-8")

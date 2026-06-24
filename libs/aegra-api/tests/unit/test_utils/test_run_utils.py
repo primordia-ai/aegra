@@ -23,6 +23,46 @@ def test_merge_jsonb_and_should_skip_event():
     assert _should_skip_event("just-a-string") is False
 
 
+def test_sanitize_for_db_coerces_non_finite_floats():
+    """Postgres json input rejects the bare NaN/Infinity tokens json.dumps emits
+    by default; sanitize_for_db must coerce them to None so SSE events (e.g. a
+    price series with a NaN) persist to run_events.data."""
+    import json
+
+    from aegra_api.utils.run_utils import sanitize_for_db
+
+    assert sanitize_for_db(float("nan")) is None
+    assert sanitize_for_db(float("inf")) is None
+    assert sanitize_for_db(float("-inf")) is None
+
+    # Finite values, ints and bools are unaffected.
+    assert sanitize_for_db(483.70001220703125) == 483.70001220703125
+    assert sanitize_for_db(42) == 42
+    assert sanitize_for_db(True) is True
+
+    # Reproduces the failing event payload nested in state values.
+    data = {
+        "structured_data": {
+            "price_series": [499.25, 481.3500061035156, float("nan"), 483.7],
+            "nested": {"vals": (1.0, float("inf"))},
+        }
+    }
+    cleaned = sanitize_for_db(data)
+    assert cleaned["structured_data"]["price_series"] == [
+        499.25,
+        481.3500061035156,
+        None,
+        483.7,
+    ]
+    assert cleaned["structured_data"]["nested"]["vals"] == (1.0, None)
+    # The crux: must serialize without emitting bare NaN/Infinity tokens.
+    json.dumps(cleaned, allow_nan=False)
+
+    # NUL bytes / surrogates still handled.
+    assert sanitize_for_db("a\u0000b") == "ab"
+    assert "\ud83d" not in sanitize_for_db("x\ud83dy")
+
+
 class DummyLogger:
     def __init__(self):
         self.calls = []

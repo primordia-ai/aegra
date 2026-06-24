@@ -193,10 +193,14 @@ async def store_sse_event(run_id: str, event_id: str, event_type: str, data: dic
         serialized_data = serializer.serialize(data)
         # 2. Sanitize the resulting primitives for DB compatibility
         safe_data = sanitize_for_db(serialized_data)
-        
+
         # Verify JSON compatibility (though safe_data should already be safe)
-        # We use json.dumps/loads as a final pass to ensure it's a plain dict/list
-        safe_data = json.loads(json.dumps(safe_data, default=str))
+        # We use json.dumps/loads as a final pass to ensure it's a plain dict/list.
+        # allow_nan=False so any non-finite float that slipped past sanitize_for_db
+        # (e.g. a numpy float that isn't a Python float subclass) raises here and
+        # falls through to the stringify fallback instead of emitting a bare `NaN`
+        # token that Postgres json rejects with InvalidTextRepresentation.
+        safe_data = json.loads(json.dumps(safe_data, default=str, allow_nan=False))
     except Exception:
         # Fallback to stringifying as a last resort to avoid crashing the run
         # Sanitize the string version too if possible
